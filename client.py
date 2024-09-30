@@ -3,7 +3,7 @@ import threading
 import json
 import ssl
 import os
-from colorama import Fore, Style
+from colorama import Style
 
 CLEAR_SCREEN = "\033[2J"
 MOVE_CURSOR = "\033[{};{}H"

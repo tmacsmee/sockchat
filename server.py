@@ -2,17 +2,17 @@ import socket
 import select
 import json
 import ssl
-import os
 import signal
-import bcrypt
+from auth import AuthManager
 
 BACKLOG = 5
+USERS_FILE = "users.json"
 
 
 class Server:
     def __init__(self, host, port):
         self.clients = {}  # {client_socket: {'username': str, 'address': tuple}}
-        self.users = self.load_users()
+        self.auth_manager = AuthManager(USERS_FILE)
 
         # Create a raw socket
         raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -27,26 +27,6 @@ class Server:
         self.server_socket = context.wrap_socket(raw_socket, server_side=True)
 
         signal.signal(signal.SIGINT, self.signal_handler)
-
-    def load_users(self):
-        if os.path.exists("users.json"):
-            with open("users.json", "r") as f:
-                return json.load(f)
-        return {}
-
-    def save_users(self):
-        with open("users.json", "w") as f:
-            json.dump(self.users, f)
-
-    def hash_password(self, password):
-        salt = bcrypt.gensalt()
-        hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
-        return hashed.decode("utf-8")
-
-    def check_password(self, stored_password, provided_password):
-        return bcrypt.checkpw(
-            provided_password.encode("utf-8"), stored_password.encode("utf-8")
-        )
 
     def signal_handler(self, signal, frame):
         print("Server is shutting down...")
@@ -89,9 +69,7 @@ class Server:
             if message_type == "login":
                 username = json_data["username"]
                 password = json_data["password"]
-                if username in self.users and self.check_password(
-                    self.users[username], password
-                ):
+                if self.auth_manager.authenticate_user(username, password):
                     self.clients[client_socket]["username"] = username
                     print(f"User {username} logged in")
                     client_socket.send(json.dumps({"type": "login_success"}).encode())
@@ -101,10 +79,7 @@ class Server:
             elif message_type == "register":
                 username = json_data["username"]
                 password = json_data["password"]
-                if username not in self.users:
-                    hashed_password = self.hash_password(password)
-                    self.users[username] = hashed_password
-                    self.save_users()
+                if self.auth_manager.register_user(username, password):
                     print(f"New user {username} registered")
                     client_socket.send(
                         json.dumps({"type": "register_success"}).encode()
