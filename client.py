@@ -1,83 +1,110 @@
 import socket
-import ssl
+import threading
 import json
-import select
+import ssl
+import os
+
+CLEAR_SCREEN = "\033[2J"
+MOVE_CURSOR = "\033[{};{}H"
+CLEAR_LINE = "\033[K"
+INPUT_PROMPT = "You: "
+
 
 class Client:
-  def __init__(self, host, port):
-    self.host = host
-    self.port = port
-    self.client_socket = None
+    def __init__(self, host, port):
+        self.username = None
+        self.logged_in = False
+        self.messages = []
 
-  def connect(self):
-    context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
-    context.load_verify_locations("cert.pem")
+        # Create a raw socket
+        raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-      client_socket.connect((self.host, self.port))
-      print(f"Connected to {self.host}:{self.port}")
+        # Wrap the raw socket in an SSL socket
+        context = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+        context.load_verify_locations("cert.pem")
+        self.client_socket = context.wrap_socket(raw_socket, server_hostname=host)
 
-      with context.wrap_socket(client_socket, server_hostname=self.host) as self.client_socket:
+        self.client_socket.connect((host, port))
+
+    def clear_screen(self):
+        print(CLEAR_SCREEN, end="")
+
+    def move_cursor(self, row, col):
+        print(MOVE_CURSOR.format(row, col), end="")
+
+    def clear_line(self):
+        print(CLEAR_LINE, end="")
+
+    def refresh_display(self):
+        self.clear_screen()
+        height, _ = os.get_terminal_size()
+        for i, message in enumerate(self.messages[-height + 2 :]):
+            self.move_cursor(i + 1, 1)
+            print(message)
+        self.move_cursor(height, 1)
+        print(INPUT_PROMPT, end="", flush=True)
+
+    def send_message(self, message):
+        try:
+            self.client_socket.send(message.encode())
+        except socket.error as e:
+            print(f"Error sending message: {e}")
+
+    def login(self):
+        while not self.logged_in:
+            self.username = input("Enter your username: ")
+            login_message = json.dumps({"type": "login", "username": self.username})
+            self.send_message(login_message)
+
+            message = self.client_socket.recv(1024).decode()
+            if not message:
+                break
+
+            json_data = json.loads(message)
+            if json_data["type"] == "login_success":
+                self.logged_in = True
+                print("\nLogin successful. You can now chat.")
+            elif json_data["type"] == "login_failed":
+                print("\nLogin failed. Please try again.")
+
+    def receive_messages(self):
+        while True:
+            try:
+                message = self.client_socket.recv(1024).decode()
+                if not message:
+                    break
+
+                json_data = json.loads(message)
+                if json_data["type"] == "message":
+                    self.messages.append(
+                        f"{json_data['username']}: {json_data['message']}"
+                    )
+                    self.refresh_display()
+            except socket.error:
+                print("Connection to server lost")
+                break
+
+    def run(self):
         self.login()
+        self.clear_screen()
 
-    
-  
-  def login(self):
-    choice = input("Do you want to login or register? (l/r): ")
-    username = input("Username: ")
-    password = input("Password: ")
+        receive_thread = threading.Thread(target=self.receive_messages)
+        receive_thread.start()
 
-    if choice not in ["l", "r"]:
-      print("Invalid choice. Please try again.")
-      return
-  
-    message = {
-      "message_type": "login" if choice == "l" else "register",
-      "username": username,
-      "password": password
-    }
+        while True:
+            self.refresh_display()
+            message = input()
+            if message.lower() == "exit()":
+                break
+            message_data = json.dumps(
+                {"type": "message", "username": self.username, "message": message}
+            )
+            self.send_message(message_data)
+            self.messages.append(f"{INPUT_PROMPT} {message}")
 
-    self.client_socket.send(json.dumps(message).encode())
-    
-    while True:
-      readable, _, _ = select.select([self.client_socket], [], [])
-      for _ in readable:
-        self.handle_message()
-
-  def handle_message(self):
-    try:
-      data = self.client_socket.recv(1024)
-      if not data:
-        print("Server disconnected")
-        self.stop()
-        return
-      json_data = json.loads(data.decode())
-      print(json_data)
-    except ssl.SSLError as e:
-      print(f"SSL Error: {e}")
-      self.stop()
-      return
-    except json.JSONDecodeError as e:
-      print(f"Error decoding JSON: {e}")
-      self.stop()
-      return
-    except Exception as e:
-      print(f"Error: {e}")
-      self.stop()
-      return
-    
-  def stop(self):
-    self.client_socket.close()
+        self.client_socket.close()
 
 
 if __name__ == "__main__":
-  client = Client("localhost", 1234)
-  try:
-    client.connect()
-    client.login("username", "password")
-  except KeyboardInterrupt:
-    print("Shutting down client...")
-  finally:
-    client.stop()
-  
-
+    client = Client("localhost", 1234)
+    client.run()
