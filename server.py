@@ -2,13 +2,18 @@ import socket
 import select
 import json
 import ssl
+import os
 import signal
+import bcrypt
 
 BACKLOG = 5
 
 
 class Server:
     def __init__(self, host, port):
+        self.clients = {}  # {client_socket: {'username': str, 'address': tuple}}
+        self.users = self.load_users()
+
         # Create a raw socket
         raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         raw_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -21,9 +26,27 @@ class Server:
         context.load_cert_chain(certfile="cert.pem", keyfile="key.pem")
         self.server_socket = context.wrap_socket(raw_socket, server_side=True)
 
-        self.clients = {}  # {client_socket: {'username': str, 'address': tuple}}
-
         signal.signal(signal.SIGINT, self.signal_handler)
+
+    def load_users(self):
+        if os.path.exists("users.json"):
+            with open("users.json", "r") as f:
+                return json.load(f)
+        return {}
+
+    def save_users(self):
+        with open("users.json", "w") as f:
+            json.dump(self.users, f)
+
+    def hash_password(self, password):
+        salt = bcrypt.gensalt()
+        hashed = bcrypt.hashpw(password.encode("utf-8"), salt)
+        return hashed.decode("utf-8")
+
+    def check_password(self, stored_password, provided_password):
+        return bcrypt.checkpw(
+            provided_password.encode("utf-8"), stored_password.encode("utf-8")
+        )
 
     def signal_handler(self, signal, frame):
         print("Server is shutting down...")
@@ -65,9 +88,30 @@ class Server:
 
             if message_type == "login":
                 username = json_data["username"]
-                self.clients[client_socket]["username"] = username
-                print(f"New user {username} logged in")
-                client_socket.send(json.dumps({"type": "login_success"}).encode())
+                password = json_data["password"]
+                if username in self.users and self.check_password(
+                    self.users[username], password
+                ):
+                    self.clients[client_socket]["username"] = username
+                    print(f"User {username} logged in")
+                    client_socket.send(json.dumps({"type": "login_success"}).encode())
+                else:
+                    print(f"Login failed for user {username}")
+                    client_socket.send(json.dumps({"type": "login_failed"}).encode())
+            elif message_type == "register":
+                username = json_data["username"]
+                password = json_data["password"]
+                if username not in self.users:
+                    hashed_password = self.hash_password(password)
+                    self.users[username] = hashed_password
+                    self.save_users()
+                    print(f"New user {username} registered")
+                    client_socket.send(
+                        json.dumps({"type": "register_success"}).encode()
+                    )
+                else:
+                    print(f"Registration failed for user {username}")
+                    client_socket.send(json.dumps({"type": "register_failed"}).encode())
             elif message_type == "message":
                 content = json_data["message"]
                 print(f"Received message: {content}")
