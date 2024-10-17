@@ -13,7 +13,14 @@ MAX_MESSAGE_LENGTH_BYTES = 1024
 
 
 class Client:
+    """
+    A client that connects to a server and allows for user registration and login.
+    """
+
     def __init__(self, host, port):
+        """
+        Initialize the client with given host and port.
+        """
         self.username = None
         self.logged_in = False
         self.messages = []
@@ -30,22 +37,40 @@ class Client:
         self.client_socket.connect((host, port))
 
     def clear_screen(self):
+        """
+        Clear the terminal screen.
+        """
         print(CLEAR_SCREEN, end="")
         self.move_cursor(1, 1)
 
     def move_cursor(self, row, col):
+        """
+        Move the cursor to the specified row and column.
+        """
         print(MOVE_CURSOR.format(row, col), end="")
 
     def clear_line(self):
+        """
+        Clear the current line.
+        """
         print(CLEAR_LINE, end="")
 
     def print_error(self, message):
+        """
+        Print an error message in red.
+        """
         print(Fore.RED + message + Style.RESET_ALL)
 
     def print_success(self, message):
+        """
+        Print a success message in green.
+        """
         print(Fore.GREEN + message + Style.RESET_ALL)
 
     def refresh_display(self):
+        """
+        Refresh the display with the latest messages.
+        """
         self.clear_screen()
         height, _ = os.get_terminal_size()
         for i, message in enumerate(self.messages[-height + 2 :]):
@@ -61,12 +86,18 @@ class Client:
         print("> ", end="", flush=True)
 
     def send_message(self, message):
+        """
+        Send a message to the server.
+        """
         try:
             self.client_socket.send(message.encode())
         except socket.error as e:
             print(f"Error sending message: {e}")
 
     def register(self):
+        """
+        Register a new user.
+        """
         username = input("Enter a new username: ")
         password = input("Enter a password: ")
         register_message = json.dumps(
@@ -84,6 +115,9 @@ class Client:
             self.print_error("Registration failed. Username may already exist.")
 
     def login(self):
+        """
+        Login to the server.
+        """
         while not self.logged_in:
             choice = input("1. Login\n2. Register\nEnter your choice (1/2): ")
             self.clear_screen()
@@ -116,10 +150,14 @@ class Client:
                 self.print_error(json_data["message"])
 
     def receive_messages(self):
+        """
+        Receive messages from the server.
+        """
         while True:
             try:
                 message = self.client_socket.recv(MAX_MESSAGE_LENGTH_BYTES).decode()
                 if not message:
+                    # don't process empty messages
                     break
 
                 json_data = json.loads(message)
@@ -133,11 +171,16 @@ class Client:
                 break
 
     def run(self):
+        """
+        Run the client, logging in and entering the chat loop.
+        """
         self.clear_screen()
         self.login()
         self.clear_screen()
 
-        receive_thread = threading.Thread(target=self.receive_messages)
+        # we want to receive messages in a separate thread so we can send messages at the same time
+        # we use a daemon thread so it will automatically exit when the main thread exits
+        receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
         receive_thread.start()
 
         while True:
@@ -146,6 +189,7 @@ class Client:
             if message.lower() == "exit()":
                 break
             if len(message) > MAX_MESSAGE_LENGTH_BYTES:
+                # don't allow messages that exceed the max length
                 self.error = f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH_BYTES} bytes. Please try again."
                 continue
             message_data = json.dumps(

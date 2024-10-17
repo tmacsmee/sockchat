@@ -12,12 +12,7 @@ MAX_MESSAGE_LENGTH_BYTES = 1024
 
 class Server:
     """
-
     A server that handles multiple client connections using SSL encryption.
-
-    Supports user authentication, registration, and message broadcasting
-    between connected clients. Uses select for non-blocking I/O operations.
-
     """
 
     def __init__(self, host, port):
@@ -56,6 +51,7 @@ class Server:
         Send a message to all connected clients except the sender.
         """
         for client_socket in self.clients:
+            # we don't want to send the message to the sender
             if client_socket == sender_socket:
                 continue
 
@@ -87,6 +83,7 @@ class Server:
         try:
             message = client_socket.recv(MAX_MESSAGE_LENGTH_BYTES).decode()
             if not message:
+                # client disconnected or sent empty message
                 self.remove_client(client_socket)
                 return
 
@@ -112,7 +109,7 @@ class Server:
         username = json_data["username"]
         password = json_data["password"]
 
-        # check if username already associated with session
+        # check if username already associated with session, if so, reject login
         for client in self.clients:
             if self.clients[client]["username"] == username:
                 print(f"Client {username} already logged in")
@@ -126,10 +123,12 @@ class Server:
                 )
                 return
 
+        # check if username and password are correct
         if self.auth_manager.authenticate_user(username, password):
             self.clients[client_socket]["username"] = username
             print(f"User {username} logged in")
             client_socket.send(json.dumps({"type": "login_success"}).encode())
+
         else:
             print(f"Login failed for user {username}")
             client_socket.send(
@@ -170,14 +169,18 @@ class Server:
         """
         print("Server started, waiting for connections...")
         while True:
+            # check for new connections, readable data, and exceptional conditions
+            # timeout of 0.5 seconds to prevent blocking indefinitely
             readable_sockets, _, exceptional_sockets = select.select(
                 [self.server_socket] + list(self.clients.keys()),
                 [],
                 list(self.clients.keys()),
+                0.5,
             )
 
             for notified_socket in readable_sockets:
                 if notified_socket == self.server_socket:
+                    # new connection
                     client_socket, client_address = self.server_socket.accept()
                     print(f"New connection from {client_address}")
                     self.clients[client_socket] = {
@@ -185,6 +188,7 @@ class Server:
                         "address": client_address,
                     }
                 else:
+                    # handle client communication
                     self.handle_client(notified_socket)
 
             for notified_socket in exceptional_sockets:
