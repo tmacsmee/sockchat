@@ -3,12 +3,13 @@ import threading
 import json
 import ssl
 import os
-from colorama import Style
+from colorama import Style, Fore
 
 CLEAR_SCREEN = "\033[2J"
 MOVE_CURSOR = "\033[{};{}H"
 CLEAR_LINE = "\033[K"
 INPUT_PROMPT = "You: "
+MAX_MESSAGE_LENGTH_BYTES = 1024
 
 
 class Client:
@@ -16,6 +17,7 @@ class Client:
         self.username = None
         self.logged_in = False
         self.messages = []
+        self.error = None
 
         # Create a raw socket
         raw_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -29,12 +31,19 @@ class Client:
 
     def clear_screen(self):
         print(CLEAR_SCREEN, end="")
+        self.move_cursor(1, 1)
 
     def move_cursor(self, row, col):
         print(MOVE_CURSOR.format(row, col), end="")
 
     def clear_line(self):
         print(CLEAR_LINE, end="")
+
+    def print_error(self, message):
+        print(Fore.RED + message + Style.RESET_ALL)
+
+    def print_success(self, message):
+        print(Fore.GREEN + message + Style.RESET_ALL)
 
     def refresh_display(self):
         self.clear_screen()
@@ -45,8 +54,11 @@ class Client:
                 print(Style.DIM + message + Style.RESET_ALL)
             else:
                 print(message)
+        if self.error:
+            self.print_error(self.error)
+            self.error = None
         self.move_cursor(height, 1)
-        print(INPUT_PROMPT, end="", flush=True)
+        print("> ", end="", flush=True)
 
     def send_message(self, message):
         try:
@@ -55,27 +67,31 @@ class Client:
             print(f"Error sending message: {e}")
 
     def register(self):
-        while True:
-            username = input("Enter a new username: ")
-            password = input("Enter a password: ")
-            register_message = json.dumps(
-                {"type": "register", "username": username, "password": password}
-            )
-            self.send_message(register_message)
+        username = input("Enter a new username: ")
+        password = input("Enter a password: ")
+        register_message = json.dumps(
+            {"type": "register", "username": username, "password": password}
+        )
+        self.send_message(register_message)
 
-            message = self.client_socket.recv(1024).decode()
-            json_data = json.loads(message)
-            if json_data["type"] == "register_success":
-                print("\nRegistration successful. You can now log in.")
-                return
-            elif json_data["type"] == "register_failed":
-                print(
-                    "\nRegistration failed. Username may already exist. Please try again."
-                )
+        message = self.client_socket.recv(MAX_MESSAGE_LENGTH_BYTES).decode()
+        json_data = json.loads(message)
+        if json_data["type"] == "register_success":
+            self.clear_screen()
+            self.print_success("Registration successful. You can now log in.")
+        elif json_data["type"] == "register_failed":
+            self.clear_screen()
+            self.print_error("Registration failed. Username may already exist.")
 
     def login(self):
         while not self.logged_in:
             choice = input("1. Login\n2. Register\nEnter your choice (1/2): ")
+            self.clear_screen()
+
+            if choice not in ["1", "2"]:
+                self.print_error("Invalid choice. Please try again.")
+                continue
+
             if choice == "2":
                 self.register()
                 continue
@@ -87,7 +103,7 @@ class Client:
             )
             self.send_message(login_message)
 
-            message = self.client_socket.recv(1024).decode()
+            message = self.client_socket.recv(MAX_MESSAGE_LENGTH_BYTES).decode()
             if not message:
                 break
 
@@ -96,12 +112,13 @@ class Client:
                 self.logged_in = True
                 print("\nLogin successful. You can now chat.")
             elif json_data["type"] == "login_failed":
-                print("\nLogin failed. Please try again.")
+                self.clear_screen()
+                self.print_error(json_data["message"])
 
     def receive_messages(self):
         while True:
             try:
-                message = self.client_socket.recv(1024).decode()
+                message = self.client_socket.recv(MAX_MESSAGE_LENGTH_BYTES).decode()
                 if not message:
                     break
 
@@ -116,6 +133,7 @@ class Client:
                 break
 
     def run(self):
+        self.clear_screen()
         self.login()
         self.clear_screen()
 
@@ -127,6 +145,9 @@ class Client:
             message = input()
             if message.lower() == "exit()":
                 break
+            if len(message) > MAX_MESSAGE_LENGTH_BYTES:
+                self.error = f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH_BYTES} bytes. Please try again."
+                continue
             message_data = json.dumps(
                 {"type": "message", "username": self.username, "message": message}
             )

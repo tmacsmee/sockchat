@@ -7,11 +7,24 @@ from auth import AuthManager
 
 BACKLOG = 5
 USERS_FILE = "users.json"
+MAX_MESSAGE_LENGTH_BYTES = 1024
 
 
 class Server:
+    """
+
+    A server that handles multiple client connections using SSL encryption.
+
+    Supports user authentication, registration, and message broadcasting
+    between connected clients. Uses select for non-blocking I/O operations.
+
+    """
+
     def __init__(self, host, port):
-        self.clients = {}  # {client_socket: {'username': str, 'address': tuple}}
+        """
+        Initialize the server with given host and port.
+        """
+        self.clients = {}  # { client_socket: { 'username': str, 'address': tuple } }
         self.auth_manager = AuthManager(USERS_FILE)
 
         # Create a raw socket
@@ -29,6 +42,9 @@ class Server:
         signal.signal(signal.SIGINT, self.signal_handler)
 
     def signal_handler(self, signal, frame):
+        """
+        Handle SIGINT (e.g. Ctrl+C) to gracefully shut down the server.
+        """
         print("Server is shutting down...")
         self.server_socket.close()
         for client_socket in self.clients:
@@ -36,29 +52,40 @@ class Server:
         exit(0)
 
     def broadcast(self, message, sender_socket):
+        """
+        Send a message to all connected clients except the sender.
+        """
         for client_socket in self.clients:
-            if client_socket != sender_socket:
-                try:
-                    json_string = json.dumps(
-                        {
-                            "type": "message",
-                            "username": self.clients[sender_socket]["username"],
-                            "message": message,
-                        }
-                    )
-                    client_socket.send(json_string.encode())
-                except socket.error:
-                    self.remove_client(client_socket)
+            if client_socket == sender_socket:
+                continue
+
+            try:
+                json_string = json.dumps(
+                    {
+                        "type": "message",
+                        "username": self.clients[sender_socket]["username"],
+                        "message": message,
+                    }
+                )
+                client_socket.send(json_string.encode())
+            except socket.error:
+                self.remove_client(client_socket)
 
     def remove_client(self, client_socket):
+        """
+        Remove a client from the server.
+        """
         if client_socket in self.clients:
             print(f"Client {self.clients[client_socket]['username']} disconnected")
             del self.clients[client_socket]
             client_socket.close()
 
     def handle_client(self, client_socket):
+        """
+        Handle all communication from a client.
+        """
         try:
-            message = client_socket.recv(1024).decode()
+            message = client_socket.recv(MAX_MESSAGE_LENGTH_BYTES).decode()
             if not message:
                 self.remove_client(client_socket)
                 return
@@ -67,37 +94,80 @@ class Server:
             message_type = json_data["type"]
 
             if message_type == "login":
-                username = json_data["username"]
-                password = json_data["password"]
-                if self.auth_manager.authenticate_user(username, password):
-                    self.clients[client_socket]["username"] = username
-                    print(f"User {username} logged in")
-                    client_socket.send(json.dumps({"type": "login_success"}).encode())
-                else:
-                    print(f"Login failed for user {username}")
-                    client_socket.send(json.dumps({"type": "login_failed"}).encode())
+                self.handle_login(client_socket, json_data)
             elif message_type == "register":
-                username = json_data["username"]
-                password = json_data["password"]
-                if self.auth_manager.register_user(username, password):
-                    print(f"New user {username} registered")
-                    client_socket.send(
-                        json.dumps({"type": "register_success"}).encode()
-                    )
-                else:
-                    print(f"Registration failed for user {username}")
-                    client_socket.send(json.dumps({"type": "register_failed"}).encode())
+                self.handle_register(client_socket, json_data)
             elif message_type == "message":
-                content = json_data["message"]
-                print(f"Received message: {content}")
-                self.broadcast(content, client_socket)
+                self.handle_message(client_socket, json_data)
             else:
                 self.remove_client(client_socket)
 
         except socket.error:
             self.remove_client(client_socket)
 
+    def handle_login(self, client_socket, json_data):
+        """
+        Handle a login request from a client.
+        """
+        username = json_data["username"]
+        password = json_data["password"]
+
+        # check if username already associated with session
+        for client in self.clients:
+            if self.clients[client]["username"] == username:
+                print(f"Client {username} already logged in")
+                client_socket.send(
+                    json.dumps(
+                        {
+                            "type": "login_failed",
+                            "message": "You are already logged in",
+                        }
+                    ).encode()
+                )
+                return
+
+        if self.auth_manager.authenticate_user(username, password):
+            self.clients[client_socket]["username"] = username
+            print(f"User {username} logged in")
+            client_socket.send(json.dumps({"type": "login_success"}).encode())
+        else:
+            print(f"Login failed for user {username}")
+            client_socket.send(
+                json.dumps(
+                    {
+                        "type": "login_failed",
+                        "message": "Incorrect username or password",
+                    }
+                ).encode()
+            )
+
+    def handle_register(self, client_socket, json_data):
+        """
+        Handle a registration request from a client.
+        """
+        username = json_data["username"]
+        password = json_data["password"]
+        if self.auth_manager.register_user(username, password):
+            print(f"New user {username} registered")
+            client_socket.send(json.dumps({"type": "register_success"}).encode())
+        else:
+            print(f"Registration failed for user {username}")
+            client_socket.send(json.dumps({"type": "register_failed"}).encode())
+
+    def handle_message(self, client_socket, json_data):
+        """
+        Handle a message from a client.
+        """
+        content = json_data["message"]
+        print(
+            f"Received message from {self.clients[client_socket]['username']}: {content}"
+        )
+        self.broadcast(content, client_socket)
+
     def run(self):
+        """
+        Run the server, listening for connections and handling client communication.
+        """
         print("Server started, waiting for connections...")
         while True:
             readable_sockets, _, exceptional_sockets = select.select(
