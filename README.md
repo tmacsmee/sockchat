@@ -1,6 +1,6 @@
 # sockchat
 
-A command line chat app using sockets.
+A command-line chat app using sockets.
 
 ## Prerequisites
 
@@ -16,10 +16,9 @@ A command line chat app using sockets.
 python -m venv env
 ```
 
-2. Activate the virtual environment
+2. Activate the virtual environment, do this when starting the server and clients as well
 
 ```sh
-# linux
 source env/bin/activate
 ```
 
@@ -37,7 +36,7 @@ pip install -r requirements.txt
 python server.py
 ```
 
-2. Connect a client
+2. Connect clients in new terminals
 
 ```sh
 python client.py
