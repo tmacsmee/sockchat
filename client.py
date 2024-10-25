@@ -10,6 +10,7 @@ MOVE_CURSOR = "\033[{};{}H"
 CLEAR_LINE = "\033[K"
 INPUT_PROMPT = "You: "
 MAX_MESSAGE_LENGTH_BYTES = 1024
+PORT = 3000
 
 
 class Client:
@@ -35,6 +36,11 @@ class Client:
         self.client_socket = context.wrap_socket(raw_socket, server_hostname=host)
 
         self.client_socket.connect((host, port))
+        message = self.client_socket.recv(MAX_MESSAGE_LENGTH_BYTES).decode()
+        json_data = json.loads(message)
+        if json_data["type"] == "connection_failed":
+            self.print_error(json_data["message"])
+            exit(1)
 
     def clear_screen(self):
         """
@@ -178,7 +184,7 @@ class Client:
         self.login()
         self.clear_screen()
 
-        # we want to receive messages in a separate thread so we can send messages at the same time
+        # we want to receive messages in a separate thread so we can display them as they arrive
         # we use a daemon thread so it will automatically exit when the main thread exits
         receive_thread = threading.Thread(target=self.receive_messages, daemon=True)
         receive_thread.start()
@@ -202,5 +208,5 @@ class Client:
 
 
 if __name__ == "__main__":
-    client = Client("localhost", 1234)
+    client = Client("localhost", PORT)
     client.run()

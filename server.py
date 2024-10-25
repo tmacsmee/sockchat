@@ -8,6 +8,7 @@ from auth import AuthManager
 BACKLOG = 5
 USERS_FILE = "users.json"
 MAX_MESSAGE_LENGTH_BYTES = 1024
+PORT = 3000
 
 
 class Server:
@@ -182,6 +183,29 @@ class Server:
                 if notified_socket == self.server_socket:
                     # new connection
                     client_socket, client_address = self.server_socket.accept()
+
+                    # reject connection if 2 clients are already connected
+                    if len(self.clients) >= 2:
+                        print(f"Rejecting connection from {client_address}")
+                        client_socket.send(
+                            json.dumps(
+                                {
+                                    "type": "connection_failed",
+                                    "message": "Server is full",
+                                }
+                            ).encode()
+                        )
+                        client_socket.close()
+                        continue
+
+                    client_socket.send(
+                        json.dumps(
+                            {
+                                "type": "connection_success",
+                            }
+                        ).encode()
+                    )
+
                     print(f"New connection from {client_address}")
                     self.clients[client_socket] = {
                         "username": None,
@@ -196,5 +220,5 @@ class Server:
 
 
 if __name__ == "__main__":
-    server = Server("localhost", 1234)
+    server = Server("localhost", PORT)
     server.run()

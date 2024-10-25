@@ -2,18 +2,31 @@
 
 A command line chat app using sockets.
 
+## Prerequisites
+
+- Python 3.x
+- Pip 3.x
+- [venv](https://docs.python.org/3/library/venv.html)
+
 ## Installation
 
-1. Install requirements
+1. Create a virtual environment
+
+```sh
+python -m venv env
+```
+
+2. Activate the virtual environment
+
+```sh
+# linux
+source env/bin/activate
+```
+
+3. Install requirements
 
 ```sh
 pip install -r requirements.txt
-```
-
-1. Generate an SSL certificate and key
-
-```sh
-openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
 ```
 
 ## Usage
@@ -30,8 +43,6 @@ python server.py
 python client.py
 ```
 
-3. Chat.
+3. Login or register
 
-## Disclaimer
-
-This is a small project and is filled with jank. This should not be used for any mildly sensitive application.
+4. Chat.
